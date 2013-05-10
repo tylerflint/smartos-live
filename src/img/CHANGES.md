@@ -1,5 +1,11 @@
 # imgadm changelog
 
+## 2.1.0
+
+- [IMGAPI-95] Add 'imgadm create' to create a virtual image from a prepared
+  VM. This is still not finalized. Creation of zvol images (i.e. for KVM VMs)
+  is not yet supported.
+
 ## 2.0.6
 
 - Change to node-progbar for progress bars.

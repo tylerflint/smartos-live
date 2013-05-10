@@ -2,22 +2,24 @@
 
 ## SYNOPSIS
 
-    imgadm help [<command>]                help on commands
+    imgadm help [<command>]             help on commands
 
-    imgadm sources [<options>]             list and edit image sources
+    imgadm sources [<options>]          list and edit image sources
 
-    imgadm avail                           list available images
-    imgadm show <uuid>                     show manifest of an available image
+    imgadm avail                        list available images
+    imgadm show <uuid>                  show manifest of an available image
 
-    imgadm import [-P <pool>] <uuid>       import image from a source
+    imgadm import [-P <pool>] <uuid>    import image from a source
     imgadm install [-P <pool>] -m <manifest> -f <file>
-                                           import from local image data
+                                        import from local image data
 
-    imgadm list                            list installed images
-    imgadm get [-P <pool>] <uuid>          info on an installed image
-    imgadm update                          gather info on unknown images
-    imgadm delete [-P <pool>] <uuid>       remove an installed image
+    imgadm list                         list installed images
+    imgadm get [-P <pool>] <uuid>       info on an installed image
+    imgadm update                       gather info on unknown images
+    imgadm delete [-P <pool>] <uuid>    remove an installed image
 
+    imgadm create [-S <url>] <uuid> [<manifest-field>=<value> ...]
+                                        create an image from a prepared VM
 
 ## DESCRIPTION
 
@@ -171,6 +173,10 @@ UUID.
         Options:
             -P <pool>          Name of zpool from which to delete the image.
                                Default is "zones".
+
+      imgadm create [-S <url>] <uuid> [<manifest-field>=<value> ...]
+
+        TODO
 
 
 ## COMPATIBILITY NOTES
