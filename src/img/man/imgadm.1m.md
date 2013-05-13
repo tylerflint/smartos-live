@@ -18,7 +18,7 @@
     imgadm update                       gather info on unknown images
     imgadm delete [-P <pool>] <uuid>    remove an installed image
 
-    imgadm create [-S <url>] <uuid> [<manifest-field>=<value> ...]
+    imgadm create [-p <url>] <uuid> [<manifest-field>=<value> ...]
                                         create an image from a prepared VM
 
 ## DESCRIPTION
@@ -44,6 +44,9 @@ UUID.
 
 **--version**
     Print the imgadm version and exit.
+
+**-v, --verbose**
+    More verbose logging. Use multiple times for more verbosity.
 
 ## SUBCOMMANDS
 
@@ -154,6 +157,7 @@ UUID.
             -P <pool>          Name of zpool in which to look for the image.
                                Default is "zones".
 
+
       imgadm update
 
         Gather info on unknown images.
@@ -163,6 +167,7 @@ UUID.
         to retrieve this information from current image sources based on
         image UUID.
 
+
       imgadm delete [-P <pool>] <uuid>
 
         Delete an image from the local zpool. The removal can only succeed if
@@ -171,12 +176,77 @@ UUID.
         children.
 
         Options:
+            -h, --help         Print this help and exit.
             -P <pool>          Name of zpool from which to delete the image.
                                Default is "zones".
 
-      imgadm create [-S <url>] <uuid> [<manifest-field>=<value> ...]
 
-        TODO
+      imgadm create [-p <url>] <uuid> [<manifest-field>=<value> ...]
+
+        Create a new image from a prepared and stopped VM.
+
+        To create a new virtual image, one first creates a VM from an existing
+        image, customizes it, runs `sm-prepare-image`, shuts it down, and
+        then runs this `imgadm create` to create the image file and manifest.
+
+        This will snapshot the VM, create a manifest and image file and
+        delete the snapshot. Optionally the image can be published directly
+        to a given image repository (IMGAPI) via "-p URL".
+
+        Usage:
+            imgadm create [<options>] <uuid> [<manifest-field>=<value> ...]
+
+        Options:
+            -h, --help     Print this help and exit.
+            -m MANIFEST    Path to image manifest data (as JSON) to
+                           include in the created manifest. Specify "-"
+                           to read manifest JSON from stdin.
+            -o PATH, --output-template PATH
+                           Path prefix to which to save the created manifest
+                           and image file. By default "NAME-VER.imgmanifest
+                           and "NAME-VER.zfs[.EXT]" are saved to the current
+                           dir. If "PATH" is a dir, then the files are saved
+                           to it. If the basename of "PATH" is not a dir,
+                           then "PATH.imgmanifest" and "PATH.zfs[.EXT]" are
+                           created.
+            -c COMPRESSION One of "none", "gz" or "bzip2" for the compression
+                           to use on the image file, if any. Default is "none".
+
+            -p URL, --publish URL
+                           Publish directly to the given image source
+                           (an IMGAPI server). You may not specify both
+                           "-p" and "-o".
+            -q, --quiet    Disable progress bar in upload.
+
+        Arguments:
+            <uuid>         The UUID of the prepared and shutdown VM
+                           from which to create the image.
+            <manifest-field>=<value>
+                           Zero or more manifest fields to include in
+                           in the created manifest. The "<value>" is
+                           first interpreted as JSON, else as a string.
+                           E.g. 'disabled=true' will be a boolean true
+                           and both 'name=foo' and 'name="true"'
+                           will be strings.
+
+        Examples:
+            # Create an image from the prepared and shutdown VM
+            # 5f7a53e9-fc4d-d94b-9205-9ff110742aaf, using some manifest JSON
+            # data from stdin.
+            echo '{"name": "foo", "version": "1.0.0"}' \
+                | imgadm create -m - 5f7a53e9-fc4d-d94b-9205-9ff110742aaf
+
+            # Specify manifest data as arguments.
+            imgadm create 5f7a53e9-fc4d-d94b-9205-9ff110742aaf \
+                name=foo version=1.0.0
+
+            # Write the manifest and image file to "/var/tmp".
+            imgadm create 5f7a53e9-fc4d-d94b-9205-9ff110742aaf \
+                name=foo version=1.0.0 -o /var/tmp
+
+            # Publish directly to an image repository (IMGAPI server).
+            imgadm create 5f7a53e9-fc4d-d94b-9205-9ff110742aaf \
+                name=foo version=1.0.0 --publish https://images.example.com
 
 
 ## COMPATIBILITY NOTES
@@ -189,9 +259,9 @@ UUID.
       <uuid>".
     - "imgadm update" used to be required to fetch current available image
       manifests from the image source(s). That is no longer required.
-      However, "imgadm update" remains and now fetches image manifests for
-      **locally install images that were not installed by imgadm**. If there
-      are none, then "imgadm update" is a no-op.
+      However, "imgadm update" remains (for backwards compat) and now fetches
+      image manifests for **locally install images that were not installed by
+      imgadm**. If there are none, then "imgadm update" is a no-op.
     - "imgadm list" default output columns have changed from
       "UUID, OS, PUBLISHED, URN" to "UUID, NAME, VERSION, OS, PUBLISHED".
       The image "urn" field is now deprecated, hence the change. The old

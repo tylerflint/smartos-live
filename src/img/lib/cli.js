@@ -451,7 +451,7 @@ CLI.prototype.printHelp = function printHelp(callback) {
         'Options:',
         '    -h, --help          Show this help message and exit.',
         '    --version           Show version and exit.',
-        '    -v, --verbose       Debug logging. Multiple times for more.'
+        '    -v, --verbose       Verbose logging. Multiple times for more.'
     ]);
 
     if (self.envopts && self.envopts.length) {
@@ -1454,8 +1454,8 @@ CLI.prototype.do_create.description = (
     + 'then runs this `imgadm create` to create the image file and manifest.\n'
     + '\n'
     + 'This will snapshot the VM, create a manifest and image file and\n'
-    + 'delete the snapshot. Optionally the image can be added directly\n'
-    + 'to a given image repository (IMGAPI) via "-S URL".\n'
+    + 'delete the snapshot. Optionally the image can be published directly\n'
+    + 'to a given image repository (IMGAPI) via "-p URL".\n'
     + '\n'
     + 'Usage:\n'
     + '    $NAME create [<options>] <uuid> [<manifest-field>=<value> ...]\n'
