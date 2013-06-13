@@ -20,6 +20,8 @@
 
     imgadm create [-p <url>] <uuid> [<manifest-field>=<value> ...]
                                         create an image from a prepared VM
+    imgadm publish -m <manifest> -f <file> <imgapi-url>
+                                        publish an image to an image repo
 
 ## DESCRIPTION
 
@@ -37,6 +39,7 @@ The manifest is a JSON serialized description.
 The identifier for an Image is its UUID. Most commands operate on Images by
 UUID.
 
+
 ## OPTIONS
 
 **-h**, **--help**
@@ -48,16 +51,17 @@ UUID.
 **-v, --verbose**
     More verbose logging. Use multiple times for more verbosity.
 
+
 ## SUBCOMMANDS
 
     The following commands are supported:
 
-      imgadm help [<command>]
+    imgadm help [<command>]
 
         Print general tool help or help on a specific command.
 
 
-      imgadm sources [<options>]
+    imgadm sources [<options>]
 
         List and edit image sources. An image source is a URL to a server
         implementing the Images API (IMGAPI). The default source is
@@ -74,7 +78,7 @@ UUID.
                                running IMGAPI server.
 
 
-      imgadm avail
+    imgadm avail
 
         List available images from all sources.
 
@@ -92,14 +96,14 @@ UUID.
         image_size, generate_passwords, description.
 
 
-      imgadm show <uuid>
+    imgadm show <uuid>
 
         Show the manifest for an available image. This searches each imgadm
         source for an available image with this UUID and prints its manifest
         (in JSON format).
 
 
-      imgadm import [-P <pool>] <uuid>
+    imgadm import [-P <pool>] <uuid>
 
         Import an image from a source IMGAPI. This finds the image with the
         given UUID in the configured sources and imports it into the local
@@ -111,20 +115,20 @@ UUID.
             -q, --quiet        Disable progress bar.
 
 
-      imgadm install [-P <pool>] -m <manifest> -f <file>
+    imgadm install [-P <pool>] -m <manifest> -f <file>
 
         Install an image from local manifest and image data files.
 
         Options:
             -h, --help         Print this help and exit.
-            -m MANIFEST        Required. Path to the image manifest file.
-            -f FILE            Required. Path to the image file to import.
+            -m <manifest>      Required. Path to the image manifest file.
+            -f <file>          Required. Path to the image file to import.
             -P <pool>          Name of zpool in which to import the image.
                                Default is "zones".
             -q, --quiet        Disable progress bar.
 
 
-      imgadm list
+    imgadm list
 
         List locally installed images.
 
@@ -147,7 +151,7 @@ UUID.
         generate_passwords, description, clones, zpool.
 
 
-      imgadm get [-P <pool>] <uuid>
+    imgadm get [-P <pool>] <uuid>
 
         Get local information for an installed image (JSON format).
 
@@ -158,7 +162,7 @@ UUID.
                                Default is "zones".
 
 
-      imgadm update
+    imgadm update
 
         Gather info on unknown images.
 
@@ -168,7 +172,7 @@ UUID.
         image UUID.
 
 
-      imgadm delete [-P <pool>] <uuid>
+    imgadm delete [-P <pool>] <uuid>
 
         Delete an image from the local zpool. The removal can only succeed if
         the image is not actively in use by a VM -- i.e. has no dependent
@@ -181,24 +185,25 @@ UUID.
                                Default is "zones".
 
 
-      imgadm create [-p <url>] <uuid> [<manifest-field>=<value> ...]
+    imgadm create [-p <url>] <uuid> [<manifest-field>=<value> ...]
 
         Create a new image from a prepared and stopped VM.
 
         To create a new virtual image, one first creates a VM from an existing
-        image, customizes it, runs `sm-prepare-image`, shuts it down, and
-        then runs this `imgadm create` to create the image file and manifest.
+        image, customizes it, runs "sm-prepare-image", shuts it down, and
+        then runs this "imgadm create" to create the image file and manifest.
 
         This will snapshot the VM, create a manifest and image file and
         delete the snapshot. Optionally the image can be published directly
-        to a given image repository (IMGAPI) via "-p URL".
+        to a given image repository (IMGAPI) via "-p URL" (or that can be
+        done separately via "imgadm publish").
 
         Usage:
             imgadm create [<options>] <uuid> [<manifest-field>=<value> ...]
 
         Options:
             -h, --help     Print this help and exit.
-            -m MANIFEST    Path to image manifest data (as JSON) to
+            -m <manifest>  Path to image manifest data (as JSON) to
                            include in the created manifest. Specify "-"
                            to read manifest JSON from stdin.
             -o PATH, --output-template PATH
@@ -247,6 +252,23 @@ UUID.
             # Publish directly to an image repository (IMGAPI server).
             imgadm create 5f7a53e9-fc4d-d94b-9205-9ff110742aaf \
                 name=foo version=1.0.0 --publish https://images.example.com
+
+    imgadm publish
+
+        Publish an image from local manifest and image data files.
+
+        Typically the local manifest and image file are created with
+        "imgadm create ...". Note that "imgadm create" supports a
+        "-p/--publish" option to publish directly in one step.
+
+        Usage:
+            imgadm publish [<options>] -m <manifest> -f <file> <imgapi-url>
+
+        Options:
+            -h, --help         Print this help and exit.
+            -m <manifest>      Required. Path to the image manifest to import.
+            -f <file>          Required. Path to the image file to import.
+            -q, --quiet        Disable progress bar.
 
 
 ## COMPATIBILITY NOTES

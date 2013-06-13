@@ -79,8 +79,12 @@ trap 'errexit $?' EXIT
 START=$(date +%s)
 
 BASE_IMAGE_UUID=$1
-OUTPUT_TEMPLATE=$2
-COMPRESSION=$3
+shift
+OUTPUT_TEMPLATE=$1
+shift
+COMPRESSION=$1
+shift
+EXTRA_ARGS="$*"
 [[ -z "$BASE_IMAGE_UUID" ]] && fatal "no BASE-IMAGE-UUID given"
 [[ -z "$OUTPUT_TEMPLATE" ]] && fatal "no OUTPUT-TEMPLATE given"
 [[ -z "$COMPRESSION" ]] && fatal "no COMPRESSION given"
@@ -107,7 +111,7 @@ vmadm stop $vm_uuid
 
 echo "Create the custom image"
 imgadm create $vm_uuid -o $OUTPUT_TEMPLATE -c $COMPRESSION \
-    name=custom-image version=1.0.0
+    name=custom-image version=1.0.0 $EXTRA_ARGS
 
 echo "Delete basis zone $vm_uuid"
 vmadm delete $vm_uuid

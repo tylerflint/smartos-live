@@ -36,8 +36,10 @@ var os = require('os');
 var path = require('path');
 var fs = require('fs');
 var assert = require('assert-plus');
+var async = require('async');
 var nopt = require('nopt');
 var sprintf = require('extsprintf').sprintf;
+var rimraf = require('rimraf');
 var bunyan;
 if (process.platform === 'sunos') {
     bunyan = require('/usr/node/node_modules/bunyan');
@@ -1189,9 +1191,9 @@ CLI.prototype.do_install = function do_install(subcmd, opts, args, callback) {
             args.length, args.join(' '))));
         return;
     }
-    assert.string(opts.manifest, '-m MANIFEST');
-    assert.string(opts.file, '-f FILE');
-    assert.optionalString(opts.zpool, '-P ZPOOL');
+    assert.string(opts.manifest, '-m <manifest>');
+    assert.string(opts.file, '-f <file>');
+    assert.optionalString(opts.zpool, '-P <zpool>');
     var zpool = opts.zpool || common.DEFAULT_ZPOOL;
 
     // 1. Validate args.
@@ -1265,8 +1267,8 @@ CLI.prototype.do_install.description = (
     + '\n'
     + 'Options:\n'
     + '    -h, --help         Print this help and exit.\n'
-    + '    -m MANIFEST        Required. Path to the image manifest file to import.\n'
-    + '    -f FILE            Required. Path to the image file to import.\n'
+    + '    -m <manifest>      Required. Path to the image manifest file to import.\n'
+    + '    -f <file>          Required. Path to the image file to import.\n'
     + '    -P <pool>          Name of zpool in which to import the image.\n'
     + '                       Default is "' + common.DEFAULT_ZPOOL + '".\n'
     + '    -q, --quiet        Disable progress bar.\n'
@@ -1336,7 +1338,7 @@ CLI.prototype.do_create = function do_create(subcmd, opts, args, callback) {
     }
     if (opts['output-template'] && opts.publish) {
         callback(new errors.UsageError(
-            'cannot specify by -o/--output-template and -p/--publish'));
+            'cannot specify both -o/--output-template and -p/--publish'));
         return;
     }
 
@@ -1434,11 +1436,29 @@ CLI.prototype.do_create = function do_create(subcmd, opts, args, callback) {
         self.tool.createImage(createOpts, function (createErr, imageInfo) {
             if (createErr) {
                 callback(createErr);
-                return;
-            }
-            if (opts.publish) {
-                p('TODO: --publish is NYI');
-                callback();
+            } else if (opts.publish) {
+                // If '-p URL' given, publish and delete the temp created
+                // image and manifest files.
+                var pOpts = {
+                    manifest: imageInfo.manifestPath,
+                    file: imageInfo.filePath,
+                    url: opts.publish,
+                    quiet: opts.quiet
+                };
+                var pArgs = [opts.publish];
+                self.do_publish('publish', pOpts, pArgs, function (pErr) {
+                    async.forEach(
+                        [imageInfo.manifestPath, imageInfo.filePath],
+                        rimraf,
+                        function (rmErr) {
+                            if (rmErr) {
+                                console.warn('Error removing temporary '
+                                    + 'created image file: %s', rmErr);
+                            }
+                            callback(pErr);
+                        }
+                    );
+                });
             } else {
                 callback();
             }
@@ -1450,19 +1470,20 @@ CLI.prototype.do_create.description = (
     'Create a new image from a prepared and stopped VM.\n'
     + '\n'
     + 'To create a new virtual image, one first creates a VM from an existing\n'
-    + 'image, customizes it, runs `sm-prepare-image`, shuts it down, and\n'
-    + 'then runs this `imgadm create` to create the image file and manifest.\n'
+    + 'image, customizes it, runs "sm-prepare-image", shuts it down, and\n'
+    + 'then runs this "imgadm create" to create the image file and manifest.\n'
     + '\n'
     + 'This will snapshot the VM, create a manifest and image file and\n'
     + 'delete the snapshot. Optionally the image can be published directly\n'
-    + 'to a given image repository (IMGAPI) via "-p URL".\n'
+    + 'to a given image repository (IMGAPI) via "-p URL" (or that can be\n'
+    + 'done separately via "imgadm publish").\n'
     + '\n'
     + 'Usage:\n'
     + '    $NAME create [<options>] <uuid> [<manifest-field>=<value> ...]\n'
     + '\n'
     + 'Options:\n'
     + '    -h, --help     Print this help and exit.\n'
-    + '    -m MANIFEST    Path to image manifest data (as JSON) to\n'
+    + '    -m <manifest>  Path to image manifest data (as JSON) to\n'
     + '                   include in the created manifest. Specify "-"\n'
     + '                   to read manifest JSON from stdin.\n'
     + '    -o PATH, --output-template PATH\n'
@@ -1525,6 +1546,87 @@ CLI.prototype.do_create.shortOpts = {
     'c': ['--compression'],
     'o': ['--output-template'],
     'p': ['--publish'],
+    'q': ['--quiet']
+};
+
+
+/**
+ * `imgadm publish -m <manifest> -f <file> <imgapi-url>`
+ */
+CLI.prototype.do_publish = function do_publish(subcmd, opts, args, callback) {
+    var self = this;
+    if (args.length !== 1) {
+        callback(new errors.UsageError(format(
+            'incorrect number of args (%d): "%s"',
+            args.length, args.join(' '))));
+        return;
+    }
+    assert.string(opts.manifest, '-m <manifest>');
+    assert.string(opts.file, '-f <file>');
+    assert.optionalBool(opts.quiet, '-q');
+    var url = args[0];
+    assert.string(url, '<imgapi-url>');
+
+    // 1. Validate args.
+    if (!fs.existsSync(opts.manifest)) {
+        callback(new errors.UsageError(format(
+            'manifest path does not exist: "%s"', opts.manifest)));
+        return;
+    }
+    if (!fs.existsSync(opts.file)) {
+        callback(new errors.UsageError(format(
+            'file path does not exist: "%s"', opts.file)));
+        return;
+    }
+    try {
+        var manifest = JSON.parse(fs.readFileSync(opts.manifest, 'utf8'));
+    } catch (err) {
+        callback(new errors.InvalidManifestError(err));
+        return;
+    }
+
+    var pubOpts = {
+        file: opts.file,
+        manifest: manifest,
+        url: url,
+        quiet: opts.quiet
+    };
+    self.tool.publishImage(pubOpts, function (pubErr) {
+        if (pubErr) {
+            callback(pubErr);
+        } else {
+            console.log('Successfully published image %s to %s',
+                manifest.uuid, url);
+            callback();
+        }
+    });
+};
+CLI.prototype.do_publish.description = (
+    /* BEGIN JSSTYLED */
+    'Publish an image from local manifest and image data files.\n'
+    + '\n'
+    + 'Typically the local manifest and image file are created with\n'
+    + '"imgadm create ...". Note that "imgadm create" supports a\n'
+    + '"-p/--publish" option to publish directly in one step.\n'
+    + '\n'
+    + 'Usage:\n'
+    + '    $NAME publish [<options>] -m <manifest> -f <file> <imgapi-url>\n'
+    + '\n'
+    + 'Options:\n'
+    + '    -h, --help         Print this help and exit.\n'
+    + '    -m <manifest>      Required. Path to the image manifest to import.\n'
+    + '    -f <file>          Required. Path to the image file to import.\n'
+    + '    -q, --quiet        Disable progress bar.\n'
+    /* END JSSTYLED */
+);
+CLI.prototype.do_publish.longOpts = {
+    'manifest': String,
+    'file': String,
+    'quiet': Boolean
+};
+CLI.prototype.do_publish.shortOpts = {
+    'm': ['--manifest'],
+    'f': ['--file'],
     'q': ['--quiet']
 };
 

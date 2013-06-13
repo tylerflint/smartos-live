@@ -437,6 +437,21 @@ function DownloadError(cause, message) {
 }
 util.inherits(DownloadError, ImgadmError);
 
+function UploadError(cause, message) {
+    if (message === undefined) {
+        message = cause;
+        cause = undefined;
+    }
+    assert.optionalObject(cause);
+    assert.string(message);
+    ImgadmError.call(this, {
+        cause: cause,
+        message: message,
+        code: 'UploadError'
+    });
+}
+util.inherits(UploadError, ImgadmError);
+
 function ConfigError(cause, message) {
     if (message === undefined) {
         message = cause;
@@ -517,6 +532,7 @@ module.exports = {
     ClientError: ClientError,
     APIError: APIError,
     DownloadError: DownloadError,
+    UploadError: UploadError,
     ConfigError: ConfigError,
     UpgradeError: UpgradeError,
     MultiError: MultiError

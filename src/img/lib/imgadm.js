@@ -774,16 +774,16 @@ IMGADM.prototype.clientFromSource = function clientFromSource(
 
 
 IMGADM.prototype._errorFromClientError = function _errorFromClientError(
-        source, err) {
-    assert.string(source.url, 'source');
+        clientUrl, err) {
+    assert.string(clientUrl, 'clientUrl');
     assert.object(err, 'err');
     if (err.body && err.body.code) {
-        return new errors.APIError(source.url, err);
+        return new errors.APIError(clientUrl, err);
     } else if (err.errno) {
-        return new errors.ClientError(source.url, err);
+        return new errors.ClientError(clientUrl, err);
     } else {
         return new errors.InternalError({message: err.message,
-            source: source.url, cause: err});
+            clientUrl: clientUrl, cause: err});
     }
 };
 
@@ -1113,7 +1113,8 @@ IMGADM.prototype.sourcesList = function sourcesList(callback) {
                 }
                 client.listImages(function (listErr, images) {
                     if (listErr) {
-                        errs.push(self._errorFromClientError(source, listErr));
+                        errs.push(self._errorFromClientError(
+                            source.url, listErr));
                     }
                     imageSetFromSourceUrl[source.url] = images || [];
                     next();
@@ -1186,7 +1187,8 @@ IMGADM.prototype.sourcesGet
                 }
                 client.getImage(uuid, function (getErr, manifest) {
                     if (getErr && getErr.statusCode !== 404) {
-                        errs.push(self._errorFromClientError(source, getErr));
+                        errs.push(self._errorFromClientError(
+                            source.url, getErr));
                         next();
                         return;
                     }
@@ -1978,6 +1980,153 @@ IMGADM.prototype.createImage = function createImage(options, callback) {
     });
 };
 
+
+/**
+ * Publish the given image to the given IMGAPI.
+ *
+ * @param options {Object}
+ *      - @param manifest {Object} The manifest to import.
+ *      - @param file {String} The image file path to import.
+ *      - @param url {String} The IMGAPI URL to which to publish.
+ *      - @param quiet {Boolean} Optional. Default false. Set to true
+ *        to not have a progress bar for the file upload.
+ * @param callback {Function} `function (err, image)`
+ */
+IMGADM.prototype.publishImage = function publishImage(opts, callback) {
+    assert.object(opts, 'options');
+    assert.object(opts.manifest, 'options.manifest');
+    var manifest = opts.manifest;
+    assert.string(opts.file, 'options.file');
+    assert.string(opts.url, 'options.url');
+    assert.optionalBool(opts.quiet, 'options.quiet');
+    // At least currently we require the manifest to have the file info
+    // (as it does if created by 'imgadm create').
+    assert.arrayOfObject(manifest.files, 'options.manifest.files');
+    var manifestFile = manifest.files[0];
+    assert.object(manifestFile, 'options.manifest.files[0]');
+    assert.string(manifestFile.compression,
+        'options.manifestFile.files[0].compression');
+    var self = this;
+
+    var client = imgapi.createClient({
+        agent: false,
+        url: opts.url,
+        log: self.log.child({component: 'api', url: opts.url}, true)
+    });
+    var uuid = manifest.uuid;
+    var rollbackImage;
+    var activatedImage;
+
+    async.series([
+        function importIt(next) {
+            client.adminImportImage(manifest, {}, function (err, image, res) {
+                self.log.trace({err: err, image: image, res: res},
+                    'AdminImportImage');
+                if (err) {
+                    next(self._errorFromClientError(opts.url, err));
+                    return;
+                }
+                console.log('Imported image %s (%s, %s, state=%s)',
+                    image.uuid, image.name, image.version, image.state);
+                rollbackImage = image;
+                next();
+            });
+        },
+        function addFile(next) {
+            var stream = fs.createReadStream(opts.file);
+            imgapi.pauseStream(stream);
+
+            var bar;
+            if (!opts.quiet && process.stderr.isTTY) {
+                bar = new ProgressBar({
+                    size: manifestFile.size,
+                    filename: uuid
+                });
+            }
+            stream.on('data', function (chunk) {
+                if (bar)
+                    bar.advance(chunk.length);
+            });
+            stream.on('end', function () {
+                if (bar)
+                    bar.end();
+            });
+
+            var fopts = {
+                uuid: uuid,
+                file: stream,
+                size: manifestFile.size,
+                compression: manifestFile.compression,
+                sha1: manifestFile.sha1
+            };
+            client.addImageFile(fopts, function (err, image, res) {
+                self.log.trace({err: err, image: image, res: res},
+                    'AddImageFile');
+                if (err) {
+                    if (bar)
+                        bar.end();
+                    next(self._errorFromClientError(opts.url, err));
+                    return;
+                }
+
+                console.log('Added file "%s" (compression "%s") to image %s',
+                    opts.file, manifestFile.compression, uuid);
+
+                // Verify uploaded size and sha1.
+                var expectedSha1 = manifestFile.sha1;
+                if (expectedSha1 !== image.files[0].sha1) {
+                    next(new errors.UploadError(format(
+                        'sha1 expected to be %s, but was %s',
+                        expectedSha1, image.files[0].sha1)));
+                    return;
+                }
+                var expectedSize = manifestFile.size;
+                if (expectedSize !== image.files[0].size) {
+                    next(new errors.UploadError(format(
+                        'size expected to be %s, but was %s',
+                        expectedSize, image.files[0].size)));
+                    return;
+                }
+
+                next();
+            });
+        },
+        function activateIt(next) {
+            client.activateImage(uuid, function (err, image, res) {
+                self.log.trace({err: err, image: image, res: res},
+                    'ActivateImage');
+                if (err) {
+                    next(self._errorFromClientError(opts.url, err));
+                    return;
+                }
+                activatedImage = image;
+                console.log('Activated image %s', uuid);
+                next();
+            });
+        }
+    ], function (err) {
+        if (err) {
+            if (rollbackImage) {
+                self.log.debug({err: err, rollbackImage: rollbackImage},
+                    'rollback partially imported image');
+                var delUuid = rollbackImage.uuid;
+                client.deleteImage(uuid, function (delErr, res) {
+                    self.log.trace({err: delErr, res: res}, 'DeleteImage');
+                    if (delErr) {
+                        self.log.debug({err: delErr}, 'error rolling back');
+                        console.log('Warning: Could not delete partially '
+                            + 'published image %s: %s', delUuid, delErr);
+                    }
+                    callback(err);
+                });
+            } else {
+                callback(err);
+            }
+        } else {
+            callback(null, activatedImage);
+        }
+    });
+};
 
 
 // ---- exports
