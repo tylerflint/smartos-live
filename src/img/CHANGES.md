@@ -2,6 +2,9 @@
 
 ## 2.1.0
 
+- [IMGAPI-95] Add 'imgadm publish' to publish a created image to an image
+  repository (an IMGAPI).
+
 - [IMGAPI-95] Add 'imgadm create' to create a virtual image from a prepared
   VM. This is still not finalized. Creation of zvol images (i.e. for KVM VMs)
   is not yet supported.

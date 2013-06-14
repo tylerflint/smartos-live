@@ -511,7 +511,9 @@ CLI.prototype.printHelp = function printHelp(callback) {
             '    imgadm delete [-P <pool>] <uuid>       remove an installed image',
             '',
             '    imgadm create <uuid> [<manifest-field>=<value> ...]',
-            '                                           create an image from a prepared VM'
+            '                                           create an image from a prepared VM',
+            '    imgadm publish -m <manifest> -f <file> <imgapi-url>',
+            '                                           publish an image to an image repo'
         ]);
         /* END JSSTYLED */
     }
