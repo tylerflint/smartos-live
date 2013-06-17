@@ -1852,7 +1852,7 @@ IMGADM.prototype.createImage = function createImage(options, callback) {
                 var INHERITED_FIELDS = ['type', 'os', 'requirements',
                     'users', 'billing_tags', 'traits', 'generate_passwords',
                     'inherited_directories', 'nic_driver', 'disk_driver',
-                    'cpu_type', 'image_size', 'acl'];
+                    'cpu_type', 'image_size'];
                 INHERITED_FIELDS.forEach(function (field) {
                     if (!m.hasOwnProperty(field)
                         && originManifest.hasOwnProperty(field))

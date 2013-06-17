@@ -18,6 +18,7 @@
     imgadm update                       gather info on unknown images
     imgadm delete [-P <pool>] <uuid>    remove an installed image
 
+    # Experimental.
     imgadm create [-p <url>] <uuid> [<manifest-field>=<value> ...]
                                         create an image from a prepared VM
     imgadm publish -m <manifest> -f <file> <imgapi-url>
@@ -187,7 +188,7 @@ UUID.
 
     imgadm create [-p <url>] <uuid> [<manifest-field>=<value> ...]
 
-        Create a new image from a prepared and stopped VM.
+        **Experimental.** Create a new image from a prepared and stopped VM.
 
         To create a new virtual image, one first creates a VM from an existing
         image, customizes it, runs "sm-prepare-image", shuts it down, and
@@ -255,7 +256,8 @@ UUID.
 
     imgadm publish
 
-        Publish an image from local manifest and image data files.
+        **Experimental.** Publish an image from local manifest and image
+        data files.
 
         Typically the local manifest and image file are created with
         "imgadm create ...". Note that "imgadm create" supports a

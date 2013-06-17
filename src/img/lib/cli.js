@@ -510,6 +510,7 @@ CLI.prototype.printHelp = function printHelp(callback) {
             '    imgadm update                          gather info on unknown images',
             '    imgadm delete [-P <pool>] <uuid>       remove an installed image',
             '',
+            '    # Experimental',
             '    imgadm create <uuid> [<manifest-field>=<value> ...]',
             '                                           create an image from a prepared VM',
             '    imgadm publish -m <manifest> -f <file> <imgapi-url>',
@@ -1469,7 +1470,7 @@ CLI.prototype.do_create = function do_create(subcmd, opts, args, callback) {
 };
 CLI.prototype.do_create.description = (
     /* BEGIN JSSTYLED */
-    'Create a new image from a prepared and stopped VM.\n'
+    '**Experimental.** Create a new image from a prepared and stopped VM.\n'
     + '\n'
     + 'To create a new virtual image, one first creates a VM from an existing\n'
     + 'image, customizes it, runs "sm-prepare-image", shuts it down, and\n'
@@ -1605,7 +1606,8 @@ CLI.prototype.do_publish = function do_publish(subcmd, opts, args, callback) {
 };
 CLI.prototype.do_publish.description = (
     /* BEGIN JSSTYLED */
-    'Publish an image from local manifest and image data files.\n'
+    '**Experimental.** Publish an image from local manifest and image\n'
+    + 'data files.\n'
     + '\n'
     + 'Typically the local manifest and image file are created with\n'
     + '"imgadm create ...". Note that "imgadm create" supports a\n'
