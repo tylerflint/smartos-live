@@ -76,10 +76,35 @@ OVERLAY_RULES=/var/run/smartdc/networking/overlay_rules.json
 #
 
 #
+# Measure elapsed time.
+# If called with no arguments a new timer is returned.
+# If called with arguments the first is used as a timer
+# value and the elapsed time is returned in the form HH:MM:SS.
+#
+timer()
+{
+	if [[ $# -eq 0 ]]; then
+		echo $(date '+%s')
+	else
+		stime=$1
+		etime=$(date '+%s')
+
+		if [[ -z "$stime" ]]; then stime=$etime; fi
+
+		dt=$((etime - stime))
+		ds=$((dt % 60))
+		dm=$(((dt / 60) % 60))
+		dh=$((dt / 3600))
+		printf '%d:%02d:%02d' $dh $dm $ds
+	fi
+}
+
+#
 # Create a lock file which we use to serialize datalink operations across zones.
 #
 lock_file()
 {
+	t=$(timer)
 	typeset cnt=0
 	typeset prev_pid=0
 	while true; do
@@ -117,6 +142,7 @@ lock_file()
 		sleep 1
 		let cnt=$cnt+1
 	done
+
 }
 
 unlock_file()
