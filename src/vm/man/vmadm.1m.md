@@ -1236,7 +1236,7 @@ tab-complete UUIDs rather than having to type them out for every command.
 
         Disable the zone memory pager. By disabling the pager, you are
         effectively disabling the 'soft-limit' as imposed by the
-        max_physical_memory configuration. In addition, zones will be able to
+        max_physical_memory configuration. In addition, zones will be allowed to
         burst past the max_physical_memory up to the 'max_swap' value. In
         general you should not disable paging unless you understand the
         implication to the hypervisor and the trade-offs entirely.
