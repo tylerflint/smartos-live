@@ -44,6 +44,7 @@
 #include <strings.h>
 #include <termios.h>
 #include <unistd.h>
+#include <zone.h>
 
 #include <arpa/inet.h>
 
@@ -67,29 +68,31 @@
 
 #include "docker-common.h"
 
-#define IPMGMTD_DOOR_OS "/etc/svc/volatile/ipadm/ipmgmt_door"
-#define IPMGMTD_DOOR_LX "/native/etc/svc/volatile/ipadm/ipmgmt_door"
+#define IPMGMTD "/lib/inet/ipmgmtd"
+#define IPMGMTD_DOOR "/etc/svc/volatile/ipadm/ipmgmt_door"
+
 #define LOGFILE "/var/log/sdc-dockerinit.log"
 #define RTMBUFSZ sizeof (struct rt_msghdr) + (3 * sizeof (struct sockaddr_in))
 #define ATTACH_CHECK_INTERVAL 200000 // 200ms
 
-int addRoute(const char *, const char *, const char *);
+int addRoute(const char *, const char *, const char *, int);
 void buildCmdline();
 void closeIpadmHandle();
 void execCmdline();
 void getBrand();
 void getStdinStatus();
-void killIpmgmtd(const char *);
+void killIpmgmtd(void);
 void mountOSDevFD();
 void openIpadmHandle();
 void plumbIf(const char *);
 int raiseIf(char *, char *, char *);
-void runIpmgmtd(boolean_t);
+void runIpmgmtd(void);
 void setupHostname();
 void setupInterface(nvlist_t *data);
 void setupInterfaces();
 void setupTerminal();
 void waitIfAttaching();
+void makePath(const char *, char *, size_t);
 
 /* global metadata client bits */
 int initialized_proto = 0;
@@ -107,6 +110,9 @@ char *path = NULL;
 struct passwd *pwd = NULL;
 struct group *grp = NULL;
 
+#define WARNLOG(format, ...) \
+    dlog("WARN %s: " format "\n", __func__, __VA_ARGS__)
+
 const char *ROUTE_ADDR_MSG =
     "WARN addRoute: invalid %s address \"%s\" for %s: %s\n";
 const char *ROUTE_WRITE_ERR_MSG =
@@ -117,32 +123,39 @@ const char *ROUTE_WRITE_LEN_MSG =
     "(if=\"%s\", gw=\"%s\", dst=\"%s\": %s)\n";
 
 void
-runIpmgmtd(boolean_t do_chroot)
+makePath(const char *base, char *out, size_t outsz)
+{
+    const char *zroot = zone_get_nroot();
+
+    (void) snprintf(out, outsz, "%s%s", zroot != NULL ? zroot : "", base);
+}
+
+void
+runIpmgmtd(void)
 {
     pid_t pid;
     int status;
-    char *cmd[] = {"/lib/inet/ipmgmtd", "ipmgmtd", NULL};
-    char *env[] = {
-        /* ipmgmtd thinks SMF is awesome */
-        "SMF_FMRI=svc:/network/ip-interface-management:default",
-        NULL
-    };
 
-
-    pid = fork();
-    if (pid == -1) {
+    if ((pid = fork()) == -1) {
         fatal(ERR_FORK_FAILED, "fork() failed: %s\n", strerror(errno));
     }
 
     if (pid == 0) {
         /* child */
-        if (do_chroot && chroot("/native") != 0) {
-            fatal(ERR_EXEC_FAILED, "chroot() failed: %s\n",
-                strerror(errno));
-        }
-        execve(cmd[0], cmd + 1, env);
-        fatal(ERR_EXEC_FAILED, "execve(%s) failed: %s\n", cmd[0],
-            strerror(errno));
+        char cmd[MAXPATHLEN];
+        char *const argv[] = {
+            "ipmgmtd",
+            NULL
+        };
+        char *const envp[] = {
+            "SMF_FMRI=svc:/network/ip-interface-management:default",
+            NULL
+        };
+
+        makePath(IPMGMTD, cmd, sizeof (cmd));
+
+        execve(cmd, argv, envp);
+        fatal(ERR_EXEC_FAILED, "execve(%s) failed: %s\n", cmd, strerror(errno));
     }
 
     /* parent */
@@ -302,7 +315,7 @@ setupInterface(nvlist_t *data)
             if ((ret == 0) && (primary == B_TRUE)) {
                 ret = nvlist_lookup_string(data, "gateway", &gateway);
                 if (ret == 0) {
-                    (void) addRoute(iface, gateway, "0.0.0.0");
+                    (void) addRoute(iface, gateway, "0.0.0.0", 0);
                 }
             }
         }
@@ -324,7 +337,7 @@ setupInterfaces()
     }
 
     ret = nvlist_parse_json((char *)json, strlen(json), &nvl,
-        NVJSON_FORCE_INTEGER);
+        NVJSON_FORCE_INTEGER, NULL);
     if (ret != 0) {
         fatal(ERR_PARSE_JSON, "failed to parse nvpair json"
             " for sdc:nics, code: %d\n", ret);
@@ -474,13 +487,14 @@ openIpadmHandle()
  * fatal().
  */
 void
-killIpmgmtd(const char *door)
+killIpmgmtd(void)
 {
     int door_fd;
     struct door_info info;
     pid_t ipmgmtd_pid;
     char *should_kill;
     int status;
+    char door[MAXPATHLEN];
 
     should_kill = (char *) mdataGet("docker:noipmgmtd");
     if ((should_kill == NULL) || (strncmp(should_kill, "true", 4) != 0)) {
@@ -489,6 +503,7 @@ killIpmgmtd(const char *door)
     }
 
     /* find the ipmgmtd pid through the door */
+    makePath(IPMGMTD_DOOR, door, sizeof (door));
     if ((door_fd = open(door, O_RDONLY)) < 0) {
         dlog("ERROR (skipping kill) failed to open ipmgmtd door(%s): %s\n",
             door, strerror(errno));
@@ -637,8 +652,20 @@ raiseIf(char *ifname, char *addr, char *netmask)
     return (0);
 }
 
+static int
+prefixToNetmask(int pfx, struct sockaddr_in *netmask_sin)
+{
+    struct sockaddr *mask = (struct sockaddr *)netmask_sin;
+
+    if (plen2mask(pfx, AF_INET, mask) != 0) {
+        return (-1);
+    }
+
+    return (0);
+}
+
 int
-addRoute(const char *ifname, const char *gw, const char *dst)
+addRoute(const char *ifname, const char *gw, const char *dst, int dstpfx)
 {
     int idx;
     int len;
@@ -673,18 +700,19 @@ addRoute(const char *ifname, const char *gw, const char *dst)
     }
 
     netmask_sin->sin_family = AF_INET;
-    if ((inet_pton(AF_INET, "0.0.0.0", &(netmask_sin->sin_addr))) != 1) {
-        dlog(ROUTE_ADDR_MSG, "netmask", "0.0.0.0", ifname, strerror(errno));
+    if (prefixToNetmask(dstpfx, netmask_sin) != 0) {
+        WARNLOG("invalid route prefix length %d", dstpfx);
         return (-3);
     }
 
-    if ((idx = if_nametoindex(ifname)) == 0) {
-        dlog("WARN addRoute: error getting interface index for %s: %s\n",
-            ifname, strerror(errno));
-        return (-4);
+    if (ifname != NULL) {
+        if ((idx = if_nametoindex(ifname)) == 0) {
+            dlog("WARN addRoute: error getting interface index for %s: %s\n",
+                ifname, strerror(errno));
+            return (-4);
+        }
+        rtm->rtm_index = idx;
     }
-
-    rtm->rtm_index = idx;
 
     if ((sockfd = socket(PF_ROUTE, SOCK_RAW, AF_INET)) < 0) {
         dlog("WARN addRoute: error opening socket: %s\n", strerror(errno));
@@ -708,6 +736,91 @@ addRoute(const char *ifname, const char *gw, const char *dst)
     return (0);
 }
 
+static int
+setupStaticRoute(nvlist_t *route, const char *idx)
+{
+    boolean_t linklocal = B_FALSE;
+    char *slash;
+    char *dstraw = NULL;
+    char *dst;
+    char *gateway;
+    int dstpfx = -1;
+    int ret = -1;
+
+    if (nvlist_lookup_boolean_value(route, "linklocal", &linklocal) == 0 &&
+      linklocal) {
+        WARNLOG("route[%s]: linklocal routes not supported", idx);
+        goto bail;
+    }
+
+    if (nvlist_lookup_string(route, "dst", &dst) != 0) {
+        WARNLOG("route[%s]: route is missing \"dst\"", idx);
+        goto bail;
+    }
+
+    if (nvlist_lookup_string(route, "gateway", &gateway) != 0) {
+        WARNLOG("route[%s]: route is missing \"gateway\"", idx);
+        goto bail;
+    }
+
+    /*
+     * Parse the CIDR-notation destination specification.  For example:
+     * "172.20.5.1/24" becomes a destination of "172.20.5.1" with a prefix
+     * length of 24.
+     */
+    if ((dstraw = strdup(dst)) == NULL) {
+        WARNLOG("route[%s]: strdup failure", idx);
+        goto bail;
+    }
+
+    if ((slash = strchr(dstraw, '/')) == NULL) {
+        WARNLOG("route[%s]: dst \"%s\" invalid", idx, dst);
+        goto bail;
+    }
+    *slash = '\0';
+    dstpfx = atoi(slash + 1);
+    if (dstpfx < 0 || dstpfx > 32) {
+        WARNLOG("route[%s]: dst \"%s\" pfx %d invalid", idx, dst, dstpfx);
+        goto bail;
+    }
+
+    if ((ret = addRoute(NULL, gateway, dstraw, dstpfx)) != 0) {
+        WARNLOG("route[%s]: failed to add (%d)", idx, ret);
+        goto bail;
+    }
+
+    ret = 0;
+
+bail:
+    free(dstraw);
+    return (ret);
+}
+
+void
+setupStaticRoutes(void)
+{
+    nvlist_t *routes = NULL;
+    uint32_t nroutes = 0;
+    uint32_t i;
+
+    getMdataArray("sdc:routes", &routes, &nroutes);
+
+    for (i = 0; i < nroutes; i++) {
+        char idx[32];
+        nvlist_t *route;
+
+        (void) snprintf(idx, sizeof (idx), "%u", i);
+        if (nvlist_lookup_nvlist(routes, idx, &route) != 0) {
+            WARNLOG("route[%s] not found in array", idx);
+            continue;
+        }
+
+        (void) setupStaticRoute(route, idx);
+    }
+
+    nvlist_free(routes);
+}
+
 void
 setupNetworking()
 {
@@ -717,66 +830,13 @@ setupNetworking()
     (void) raiseIf("lo0", "127.0.0.1", "255.0.0.0");
 
     setupInterfaces();
+
+    /*
+     * Configure any additional static routes from NAPI networks:
+     */
+    setupStaticRoutes();
+
     closeIpadmHandle();
-}
-
-/*
- * Fork a child and run all networking-related commands in a chroot to /native.
- * This is for two reasons:
- *
- * 1) ipadm_door_call() looks for a door in /etc/, but ipmgmtd in this zone is
- *    running in native (non-LX) mode, so it opens its door in /native/etc.
- * 2) ipadm_set_addr() calls getaddrinfo(), which relies on the existence of
- *    /etc/netconfig. This file is present in /native/etc instead.
- */
-void
-chrootNetworking() {
-    pid_t pid;
-    int status;
-
-    dlog("INFO forking child for networking chroot\n");
-
-    pid = fork();
-    if (pid == -1) {
-        fatal(ERR_FORK_FAILED, "networking fork() failed: %s\n",
-            strerror(errno));
-    }
-
-    if (pid == 0) {
-        /* child */
-
-        if (chroot("/native") != 0) {
-            fatal(ERR_CHROOT_FAILED, "chroot() failed: %s\n", strerror(errno));
-        }
-
-        setupNetworking();
-
-        exit(0);
-    } else {
-        /* parent */
-        dlog("<%d> Network setup child\n", (int)pid);
-
-        while (wait(&status) != pid) {
-            /* EMPTY */;
-        }
-
-        if (WIFEXITED(status)) {
-            if (WEXITSTATUS(status) != 0) {
-                fatal(ERR_CHILD_NET, "<%d> Networking child exited: %d\n",
-                    (int)pid, WEXITSTATUS(status));
-            }
-
-            dlog("<%d> Networking child exited: %d\n",
-                (int)pid, WEXITSTATUS(status));
-
-        } else if (WIFSIGNALED(status)) {
-            fatal(ERR_CHILD_NET, "<%d> Networking child died on signal: %d\n",
-                (int)pid, WTERMSIG(status));
-        } else {
-            fatal(ERR_CHILD_NET,
-                "<%d> Networking child failed in unknown way\n", (int)pid);
-        }
-    }
 }
 
 long long
@@ -854,8 +914,6 @@ main(int __attribute__((unused)) argc, char __attribute__((unused)) *argv[])
     int fd;
     int ret;
     int tmpfd;
-    const char *ipmgmtd_door;
-    boolean_t ipmgmtd_chroot = B_FALSE;
 
     /* we'll write our log in /var/log */
     mkdir("/var", 0755);
@@ -890,8 +948,6 @@ main(int __attribute__((unused)) argc, char __attribute__((unused)) *argv[])
 
     switch (brand) {
         case LX:
-            ipmgmtd_chroot = B_TRUE;
-            ipmgmtd_door = IPMGMTD_DOOR_LX;
             setupMtab();
             break;
         case JOYENT_MINIMAL:
@@ -900,7 +956,6 @@ main(int __attribute__((unused)) argc, char __attribute__((unused)) *argv[])
              * but without /proc being lxproc, we need to mount /dev/fd
              */
             mountOSDevFD();
-            ipmgmtd_door = IPMGMTD_DOOR_OS;
             /* no need for /etc/mtab updates here either */
             break;
         default:
@@ -914,16 +969,12 @@ main(int __attribute__((unused)) argc, char __attribute__((unused)) *argv[])
     mkdir("/var/run/network", 0755);
 
     /* NOTE: will call fatal() if there's a problem */
-    runIpmgmtd(ipmgmtd_chroot);
+    runIpmgmtd();
 
-    if (brand == LX) {
-        chrootNetworking();
-    } else {
-        setupNetworking();
-    }
+    setupNetworking();
 
     /* kill ipmgmtd if we don't need it any more */
-    killIpmgmtd(ipmgmtd_door);
+    killIpmgmtd();
 
     dlog("INFO network setup complete\n");
 
